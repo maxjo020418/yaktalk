@@ -7,6 +7,8 @@ from langchain_core.vectorstores import InMemoryVectorStore
 
 from utils.get_env import OLLAMA_SERVER_URL
 
+import warnings
+
 
 vector_store: InMemoryVectorStore | None = None
 
@@ -27,6 +29,7 @@ async def db_init(pdf_file_path: str, embed_model: str = "llama3.1:8b") -> None:
 def query_pdf(query: str) -> list[Document] | None:
     """Returns the most relevant text from the PDF file based on the query."""
     if vector_store is None:
+        warnings.warn("Vector store is not initialized.")
         return None
     docs = vector_store.similarity_search(query)
     return docs if docs else None
