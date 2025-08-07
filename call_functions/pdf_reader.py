@@ -16,12 +16,14 @@ import tqdm
 
 vector_store: InMemoryVectorStore | None = None
 
+TOP_K = 4
 
-async def db_init(pdf_file_path: str, 
-                  embed_model: str = "llama3.1:8b",
-                  chunk_size: int = 512,
-                  chunk_overlap: int = 20
-                  ) -> None:
+
+def db_init(pdf_file_path: str, 
+            embed_model: str = "llama3.1:8b",
+            chunk_size: int = 512,
+            chunk_overlap: int = 20
+            ) -> None:
     """Initializes the vector store for the provided PDF file."""
     global vector_store
     embeddings = OllamaEmbeddings(
@@ -71,7 +73,6 @@ async def db_init(pdf_file_path: str,
 @tool
 def query_pdf(query: str) -> list[Document] | None:
     """Returns the most relevant chunks of text from the PDF file based on the query from a vector store."""
-    TOP_K = 5
 
     if vector_store is None:
         warnings.warn("Vector store is not initialized.")
