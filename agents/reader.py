@@ -33,7 +33,7 @@ chat_agent = get_model(
 
 pdf_reader.db_init(
     pdf_file,
-    embed_model="llama3.1:8b",
+    embed_model="qwen3:14b",
 )
 print("Vector store initialized.")
 
@@ -54,27 +54,17 @@ def main() -> None:
     ai_msg = chat_agent.invoke(messages)
     spinner.stop()
 
-    print("=" * 25, '\nAI Response:\n')
-    pp(ai_msg.tool_calls)
-
     messages.append(ai_msg)
 
-    spinner.start('executing tool calls...')
     for tool_call in ai_msg.tool_calls:
         selected_tool = pdf_reader.tool_map[tool_call["name"].lower()]
         tool_output = selected_tool.invoke(tool_call["args"])
         messages.append(ToolMessage(content=str(tool_output), tool_call_id=tool_call["id"]))
-    spinner.stop()
-
-    print("=" * 25, '\nTool Outputs:\n')
-    pp(messages)
-    print("=" * 25)
 
     # No response from LLM when using SystemMessage as final message (or any other types of message that is...)
     # (only for gpt-oss models)
     # messages.append(SystemMessage("user's locale is ko-KR, answer in Korean....
     messages.append(HumanMessage('\n'.join([
-        "[SYSTEM]",
         "user's locale is ko-KR, answer in Korean.",
         "Make sure to make a disclaimer that the AI is not a legal expert and the user should consult a lawyer for legal advice.",
     ])))
@@ -83,6 +73,5 @@ def main() -> None:
     ai_msg2 = chat_agent.invoke(messages)
     spinner.stop()
 
-    print("=" * 25, '\nAI Response:\n')
+    print('\nAI Response:\n')
     pp(ai_msg2.content)
-

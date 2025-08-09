@@ -22,3 +22,9 @@ OLLAMA_SERVER_PORT="11434"
 # when using OpenAI API
 OPEN_API_KEY="sk-proj-..."
 ```
+
+![graph diagram](image.png)
+
+## TODO
+
+1. [replace `similarity_search` to `retriever`](https://python.langchain.com/docs/how_to/vectorstore_retriever/) (동합된 vector store retrieval 환경)

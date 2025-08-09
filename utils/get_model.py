@@ -15,7 +15,7 @@ def get_model(tools: Sequence,
     """
     Docstring for get_model
     
-    :param tools: tool_map 반환 하면 됨.
+    :param tools: `tools` 넣으면 됨.
     :type tools: Sequence
     :param model: supported model for respective services, default is LLM_MODEL from env
     :type model: str | None
