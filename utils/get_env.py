@@ -15,7 +15,7 @@ match LLM_SERVICE:
     case "ollama":
         assert os.getenv("OLLAMA_SERVER_URL") and os.getenv("OLLAMA_SERVER_PORT"), \
             "OLLAMA_SERVER_URL and OLLAMA_SERVER_PORT must be set up"
-        OLLAMA_SERVER_URL = os.getenv("OLLAMA_SERVER_URL") + ":" + os.getenv("OLLAMA_SERVER_PORT") # type: ignore
+        OLLAMA_SERVER_URL = os.getenv("OLLAMA_SERVER_URL") # type: ignore
         print(f'Using Ollama server: {OLLAMA_SERVER_URL}')
     case "openai":
         assert os.getenv("OPEN_API_KEY"), \
