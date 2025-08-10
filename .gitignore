@@ -15,7 +15,6 @@ __pycache__/
 .env
 
 # Database
-database/
 *.db
 *.sqlite
 *.sqlite3
@@ -45,3 +44,5 @@ models/
 Thumbs.db
 .Spotlight-V100
 .Trashes
+
+.claude
