@@ -6,16 +6,20 @@ load_dotenv()
 
 LLM_SERVICE = os.getenv("LLM_SERVICE")
 LLM_MODEL = os.getenv("LLM_MODEL")
-OLLAMA_SERVER_URL = None
 OPEN_API_KEY = SecretStr("NO_KEY")
+
+if osu := os.getenv("OLLAMA_SERVER_URL"):
+    OLLAMA_SERVER_URL = osu
+    OLLAMA_SERVER_PORT = os.getenv("OLLAMA_SERVER_PORT") or "11434"
+else:
+    raise ValueError("OLLAMA_SERVER_URL must be set up for Ollama embeddings (and optional LLM svc)")
 
 assert LLM_MODEL, "model must be set up for services"
 
 match LLM_SERVICE:
     case "ollama":
-        assert os.getenv("OLLAMA_SERVER_URL") and os.getenv("OLLAMA_SERVER_PORT"), \
+        assert OLLAMA_SERVER_URL and OLLAMA_SERVER_PORT, \
             "OLLAMA_SERVER_URL and OLLAMA_SERVER_PORT must be set up"
-        OLLAMA_SERVER_URL = os.getenv("OLLAMA_SERVER_URL") # type: ignore
         print(f'Using Ollama server: {OLLAMA_SERVER_URL}')
     case "openai":
         assert os.getenv("OPEN_API_KEY"), \
@@ -28,5 +32,8 @@ match LLM_SERVICE:
         print(f"Using OpenAI API with key: {OPEN_API_KEY.get_secret_value()[:10]}...")
     case _:
         raise ValueError("LLM_SERVICE must be set to 'openai' or 'ollama'")
+
+# Law API configuration
+OPEN_LAW_GO_ID = os.getenv("OPEN_LAW_GO_ID", "test")
 
 DATA_DIR="./data"

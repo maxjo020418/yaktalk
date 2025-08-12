@@ -21,7 +21,7 @@ import chromadb
 from chromadb.config import Settings
 
 from utils.custom_embeddings import get_law_embeddings
-from utils.get_env import OLLAMA_SERVER_URL
+from utils.get_env import OLLAMA_SERVER_URL, OPEN_LAW_GO_ID
 
 
 @dataclass
@@ -58,9 +58,9 @@ class ArticleInfo:
 class LawAPIClient:
     """법령 API 클라이언트"""
     
-    def __init__(self, config: LawConfig = None):
+    def __init__(self, config: LawConfig | None = None):
         self.config = config or LawConfig()
-        self.api_key = os.getenv("OPEN_LAW_GO_ID", "test")
+        self.api_key = OPEN_LAW_GO_ID
     
     def search_laws(self, query: str) -> Optional[Dict]:
         """법령 검색"""
@@ -110,7 +110,7 @@ class LawAPIClient:
 class LawDocumentProcessor:
     """법령 문서 처리기"""
     
-    def __init__(self, config: LawConfig = None):
+    def __init__(self, config: LawConfig | None = None):
         self.config = config or LawConfig()
     
     def parse_article_number(self, article_num: str) -> ArticleInfo:
@@ -218,11 +218,10 @@ class LawDocumentProcessor:
 
 
 class LawVectorStore:
-    """법령 벡터 스토어 관리자"""
+    """법령 벡터 스토어 관리"""
     
-    def __init__(self, config: LawConfig = None):
+    def __init__(self, config: LawConfig | None = None):
         self.config = config or LawConfig()
-        self.vectorstore: Optional[Chroma] = None
         self.processor = LawDocumentProcessor(config)
         self._initialize()
     
@@ -244,7 +243,8 @@ class LawVectorStore:
             embedding_function=embeddings,
             persist_directory=str(persist_directory)
         )
-        
+
+        assert self.vectorstore is not None, f"Vectorstore must be initialized"
         print(f"✅ 법령 ChromaDB 초기화 완료: {persist_directory}")
     
     def add_law_data(self, law_data: Dict) -> int:
@@ -264,6 +264,7 @@ class LawVectorStore:
         splits = text_splitter.split_documents(documents)
         
         if splits:
+            assert self.vectorstore is not None, "Vectorstore must be initialized before adding documents"
             self.vectorstore.add_documents(splits)
             print(f"✅ {len(splits)}개의 법령 청크 추가 완료")
         
@@ -271,15 +272,12 @@ class LawVectorStore:
     
     def search(self, query: str, k: int = 5) -> List[Document]:
         """벡터스토어에서 검색"""
-        try:
-            retriever = self.vectorstore.as_retriever(
-                search_type="similarity",
-                search_kwargs={"k": k}
-            )
-            return retriever.invoke(query) or []
-        except Exception as e:
-            print(f"DB 검색 오류: {e}")
-            return []
+        assert self.vectorstore is not None, "Vectorstore must be initialized before searching"
+        retriever = self.vectorstore.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": k}
+        )
+        return retriever.invoke(query) or []
     
     def is_sufficient_result(self, docs: List[Document], query: str) -> bool:
         """검색 결과가 충분한지 판단"""
@@ -343,8 +341,8 @@ class LawService:
             return self._format_results(existing_docs[:3], "기존 근거법령")
         
         return "관련 법령 정보를 찾을 수 없습니다."
-    
-    def load_law_by_id(self, law_id: str = None, mst: str = None) -> str:
+
+    def load_law_by_id(self, law_id: str | None = None, mst: str | None = None) -> str:
         """특정 법령 ID로 법령 정보 로드"""
         law_data = None
         
@@ -356,17 +354,14 @@ class LawService:
         if law_data and '법령' in law_data:
             law_info = law_data['법령']
             self.vector_store.add_law_data(law_data)
-            
-            return f"""
-법령명: {law_info.get('법령명_한글', 'N/A')}
-법령ID: {law_info.get('법령ID', 'N/A')}
-공포일자: {law_info.get('공포일자', 'N/A')}
-시행일자: {law_info.get('시행일자', 'N/A')}
-소관부처: {law_info.get('소관부처명', 'N/A')}
-조문 수: {len(law_info.get('조문', []))}개
 
-✅ 법령 정보가 벡터스토어에 저장되었습니다.
-            """.strip()
+            return f"법령명: {law_info.get('법령명_한글', 'N/A')}" \
+                   f"\n법령ID: {law_info.get('법령ID', 'N/A')}" \
+                   f"\n공포일자: {law_info.get('공포일자', 'N/A')}" \
+                   f"\n시행일자: {law_info.get('시행일자', 'N/A')}" \
+                   f"\n소관부처: {law_info.get('소관부처명', 'N/A')}" \
+                   f"\n조문 수: {len(law_info.get('조문', []))}개" \
+                   f"\n법령 정보가 벡터스토어에 저장되었습니다.".strip()
         
         return "법령 정보를 찾을 수 없습니다."
     
@@ -414,28 +409,24 @@ _law_service = LawService()
 @tool
 def search_law_by_query(query: str) -> str:
     """
-    법령 정보를 검색하고 관련 내용을 반환
+    Search for legal information and return relevant content.
     
     Args:
-        query: 검색할 법령 관련 질문
+        query: Legal-related query to search
     
     Returns:
-        관련 법령 정보
+        Relevant legal information
     """
     return _law_service.search_laws(query)
 
 
 @tool
-def load_law_by_id(law_id: str = None, mst: str = None) -> str:
+def load_law_by_id(law_id: str | None = None, mst: str | None = None) -> str:
     """
-    특정 법령 ID 또는 일련번호로 법령 정보 로드
-    
-    Args:
-        law_id: 법령 ID
-        mst: 법령 일련번호
+    Load legal information by specific law ID or serial number.
     
     Returns:
-        법령 정보
+        Legal information
     """
     return _law_service.load_law_by_id(law_id, mst)
 

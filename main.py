@@ -1,7 +1,3 @@
-"""
-법령 정보 통합 챗봇 - PDF 참조 및 법령 API 연동
-"""
-
 import os
 from pathlib import Path
 from typing_extensions import TypedDict
@@ -18,7 +14,7 @@ from langgraph.prebuilt import ToolNode
 
 from utils.get_env import DATA_DIR
 from utils.get_model import get_model
-from call_functions import pdf_reader_chroma, law_api
+from call_functions import pdf_reader, law_api
 
 set_debug(True)
 memory = InMemorySaver()
@@ -35,7 +31,7 @@ class LawChatbot:
     """법률 챗봇 메인 클래스"""
     
     def __init__(self):
-        self.all_tools = pdf_reader_chroma.tools + law_api.tools
+        self.all_tools = pdf_reader.tools + law_api.tools
         self.llm = get_model(
             tools=self.all_tools,
             model="qwen3:14b",
@@ -47,10 +43,6 @@ class LawChatbot:
         """LangGraph 빌드"""
         graph_builder = StateGraph(MainState)
         
-        # 도구 노드들
-        pdf_tool_node = ToolNode(name="pdf_tools", tools=pdf_reader_chroma.tools)
-        law_tool_node = ToolNode(name="law_tools", tools=law_api.tools)
-        
         # 노드 추가
         graph_builder.add_node("initialize", self._initialize_system)
         graph_builder.add_node("chatbot", self._chatbot)
@@ -61,20 +53,20 @@ class LawChatbot:
         graph_builder.add_edge(START, "initialize")
         graph_builder.add_edge("initialize", "chatbot")
         
-        # 조건부 라우팅
+        # 조건부 라우팅 - chatbot에서 도구로
         graph_builder.add_conditional_edges(
             "chatbot",
             self._route_tools,
             {
                 "pdf_tools": "pdf_tools",
                 "law_tools": "law_tools", 
-                END: END
+                "end": END
             }
         )
         
-        # 도구 처리 후 종료
-        graph_builder.add_edge("pdf_tools", END)
-        graph_builder.add_edge("law_tools", END)
+        # 도구 처리 후 다시 chatbot으로 - 피드백 루프 생성
+        graph_builder.add_edge("pdf_tools", "chatbot")
+        graph_builder.add_edge("law_tools", "chatbot")
         
         return graph_builder.compile(checkpointer=memory)
     
@@ -90,6 +82,10 @@ class LawChatbot:
         if selected_index is None:
             raise ValueError("파일이 선택되지 않았습니다.")
         
+        # Handle potential tuple return from terminal_menu
+        if isinstance(selected_index, tuple):
+            selected_index = selected_index[0]
+        
         return os.path.join(DATA_DIR, files[selected_index])
     
     def _initialize_system(self, state: MainState) -> MainState:
@@ -98,12 +94,12 @@ class LawChatbot:
         
         # PDF 초기화
         if not state.get("pdf_initialized", False):
-            if not pdf_reader_chroma.is_chromadb_initialized():
+            if not pdf_reader.is_chromadb_initialized():
                 print("\n📚 PDF 문서를 선택해주세요:")
                 try:
                     pdf_file = self._get_pdf_file()
                     print(f"✅ PDF 초기화 중: {os.path.basename(pdf_file)}")
-                    pdf_reader_chroma.initialize_chromadb(
+                    pdf_reader.initialize_chromadb(
                         pdf_file_path=pdf_file,
                         chunk_size=1024,
                         chunk_overlap=100
@@ -137,43 +133,58 @@ class LawChatbot:
             "ALWAYS respond in Korean language, but follow these English instructions."
         )
         
-        messages = [system_prompt] + list(state["messages"])
-        response = self.llm.invoke(messages, config={"configurable": {"thread_id": "1"}})
+        # 시스템 프롬프트가 이미 있는지 확인
+        messages = list(state["messages"])
+        if not messages or not isinstance(messages[0], SystemMessage):
+            messages = [system_prompt] + messages
         
-        return {"messages": [response]}
-    
+        response = self.llm.invoke(messages, config={"configurable": {"thread_id": "1"}})
+
+        return MainState(
+            messages=list(state["messages"]) + [response],
+            pdf_initialized=state["pdf_initialized"],
+            law_initialized=state["law_initialized"],
+        )
+
     def _process_pdf_tool(self, state: MainState) -> MainState:
         """PDF 도구 처리"""
-        return self._process_tool(state, pdf_reader_chroma.tools, 
-            "PDF content has been examined. Now search for relevant legal statutes and provide legal basis. Respond in Korean.")
-    
-    def _process_law_tool(self, state: MainState) -> MainState:
-        """법령 도구 처리"""
-        return self._process_tool(state, law_api.tools, 
-            "Legal statutes have been retrieved. Provide a detailed answer based on these legal provisions. "
-            "Always cite articles in format like '민법 제○조제○항'. Respond in Korean language.")
-    
-    def _process_tool(self, state: MainState, tools: list, system_message: str) -> MainState:
-        """도구 처리 공통 로직"""
         last_message = state["messages"][-1]
         ai_message = cast(AIMessage, last_message)
         
         if not (hasattr(ai_message, 'tool_calls') and ai_message.tool_calls):
             return state
         
-        tool_node = ToolNode(tools=tools)
-        tool_response = tool_node.invoke(ai_message.tool_calls)
+        tool_node = ToolNode(tools=pdf_reader.tools)
+        tool_response = tool_node.invoke({"messages": [ai_message]})
         
-        if tool_response and "messages" in tool_response:
-            tool_msg = tool_response["messages"][-1]
-            
-            res = self.llm.invoke(
-                [SystemMessage(system_message), tool_msg],
-                config={"configurable": {"thread_id": "1"}}
-            )
-            return {"messages": [res]}
+        # 도구 실행 결과를 메시지 리스트에 추가
+        new_messages = list(state["messages"]) + tool_response["messages"]
         
-        return state
+        return MainState(
+            messages=new_messages,
+            pdf_initialized=state["pdf_initialized"],
+            law_initialized=state["law_initialized"],
+        )
+    
+    def _process_law_tool(self, state: MainState) -> MainState:
+        """법령 도구 처리"""
+        last_message = state["messages"][-1]
+        ai_message = cast(AIMessage, last_message)
+        
+        if not (hasattr(ai_message, 'tool_calls') and ai_message.tool_calls):
+            return state
+        
+        tool_node = ToolNode(tools=law_api.tools)
+        tool_response = tool_node.invoke({"messages": [ai_message]})
+        
+        # 도구 실행 결과를 메시지 리스트에 추가
+        new_messages = list(state["messages"]) + tool_response["messages"]
+        
+        return MainState(
+            messages=new_messages,
+            pdf_initialized=state["pdf_initialized"],
+            law_initialized=state["law_initialized"],
+        )
     
     def _route_tools(self, state: MainState) -> str:
         """도구 라우팅 결정"""
@@ -191,7 +202,7 @@ class LawChatbot:
             if any(name in ["search_law_by_query", "load_law_by_id"] for name in tool_names):
                 return "law_tools"
         
-        return END
+        return "end"
     
     def run_chat_loop(self):
         """메인 채팅 루프"""
@@ -204,7 +215,7 @@ class LawChatbot:
         print("-" * 60)
         
         # 다이어그램 저장
-        Path("law_chatbot_diagram.png").write_bytes(
+        Path("langchain_diagram.png").write_bytes(
             self.graph.get_graph().draw_mermaid_png()
         )
         

@@ -1,234 +1,118 @@
 # YAKTALK
 
-YakTalk is sophisticated AI-powered legal assistant that analyzes PDF documents and provides legally-grounded responses based on Korean statutes. The system uses LangGraph, ChromaDB, and Ollama to create an intelligent workflow that examines documents and cites relevant legal provisions.
+YakTalk is a legal assistant that analyzes PDF documents and answers questions citing Korean statutes. It uses LangGraph for orchestration, ChromaDB for vector storage, and Ollama models for local inference.
 
-## 🎯 Key Features
+## Key Features
 
-- **PDF Document Analysis**: Upload and analyze any PDF document (contracts, agreements, legal documents)
-- **Korean Law Integration**: Automatically retrieves relevant Korean statutes from the National Law Information Center API
-- **Legal Citation**: All responses are grounded in specific legal provisions with proper article citations
-- **Intelligent Workflow**: PDF analysis → Legal statute retrieval → Law-based response generation
-- **Persistent Storage**: Uses ChromaDB for efficient vector storage and retrieval
-- **Local Embeddings**: PDF processing uses local sentence-transformers for privacy and speed
+- PDF document ingestion and chunked retrieval
+- Korean law lookup (National Law Information Center API)
+- Responses grounded with article citations
+- Local embedding for PDFs (privacy, speed)
+- Persistent ChromaDB stores for PDFs and laws
 
-## 🏗️ Architecture
-![graph diagram](law_chatbot_diagram.png)
+## Architecture
+![graph diagram](langchain_diagram.png)
 
 ```
 User Query
-    ↓
-PDF Analysis (search_pdf_content)
-    ↓
-Legal Statute Search (search_law_by_query)
-    ↓
-Law-Based Response (with article citations)
+   -> PDF Retrieval (search_pdf_content)
+   -> Law Retrieval (search_law_by_query)
+   -> Response (with legal citations)
 ```
 
 ### Core Components
 
-1. **PDF Processing Module** (`call_functions/pdf_reader_chroma.py`)
-   - Loads and chunks PDF documents
-   - Creates vector embeddings using local models
-   - Stores in ChromaDB for efficient retrieval
+1. PDF Processing (`call_functions/pdf_reader_chroma.py`): load, split, embed, store
+2. Law API (`call_functions/law_api.py`): fetch, normalize, embed statutes
+3. Chat Orchestrator (`main_law_chatbot.py`): tool routing, state, answer synthesis
 
-2. **Law API Module** (`call_functions/law_api.py`)
-   - Interfaces with Korean National Law Information Center
-   - Retrieves and processes legal statutes
-   - Maintains legal document vector store
-
-3. **Main Chatbot** (`main_law_chatbot.py`)
-   - Orchestrates the workflow using LangGraph
-   - Manages tool routing and state
-   - Ensures responses are legally grounded
-
-## 📋 Prerequisites
+## Prerequisites
 
 - Python 3.8+
-- Ollama with `qwen3:14b` model installed 
-- Korean National Law Information Center API key
+- Ollama running with required models
+- OPEN_LAW_GO_ID (National Law API credential)
 
-## 🚀 Installation
+## Installation
 
-1. **Clone the repository**
+Clone and enter project:
 ```bash
 git clone https://github.com/yourusername/yaktalk.git
 cd yaktalk
 ```
 
-2. **Create virtual environment**
+Create and activate virtual environment:
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 ```
 
-3. **Install dependencies**
+Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-4. **Set up environment variables**
-Create a `.env` file in the project root:
+Environment variables (`.env`):
 ```env
-# Ollama Configuration
+# Required: LLM Service Configuration
+LLM_SERVICE=ollama                    # or "openai"  
+LLM_MODEL=qwen3:14b                   # model name for chosen service
+
+# Required: Ollama Configuration (if using ollama)
 OLLAMA_SERVER_URL=http://localhost:11434
+OLLAMA_SERVER_PORT=11434              # optional, defaults to 11434
 
-# Law API Configuration (open.law.go.kr ID)
-OPEN_LAW_GO_ID=your_id_here
+# Required: OpenAI Configuration (if using openai)
+OPEN_API_KEY=your_openai_key_here     # required if LLM_SERVICE=openai
 
-# Data Directory
-DATA_DIR=./data
+# Required: Korean Law API
+OPEN_LAW_GO_ID=your_id_here           # National Law Information Center API key
+
+# Optional: Data Directory
+DATA_DIR=./data                       # defaults to "./data"
 ```
 
-5. **Install Ollama models**
+Pull Ollama models:
 ```bash
-# Install the main LLM
+# recommended models
 ollama pull qwen3:14b
-
-# Install embedding model (for law API)
 ollama pull nomic-embed-text
 ```
 
-## 📁 Project Structure
+## Usage
 
-```
-yaktalk/
-├── main_law_chatbot.py          # Main entry point
-├── call_functions/
-│   ├── law_api.py              # Korean law API integration
-│   └── pdf_reader_chroma.py    # PDF processing module
-├── utils/
-│   ├── custom_embeddings.py    # Embedding utilities
-│   ├── get_env.py              # Environment configuration
-│   └── get_model.py            # Model configuration
-├── data/                       # PDF files directory
-├── database/                   # ChromaDB storage
-│   ├── pdf_chroma_db/         # PDF embeddings
-│   └── law_chroma_db/         # Law embeddings
-└── requirements.txt            # Python dependencies
-```
-
-## 💻 Usage
-
-### Basic Usage
-
-1. **Start the application**
+Start:
 ```bash
 python main_law_chatbot.py
 ```
 
-2. **Select a PDF file**
-   - Place your PDF files in the `data/` directory
-   - The system will prompt you to select a file on startup
+Place PDFs in `data/` then select one at startup. Ask factual or legal questions referencing the loaded PDF.
 
-3. **Ask questions**
-   - Ask about the content of the PDF
-   - Request legal analysis
-   - The system will provide responses based on relevant Korean laws
+Exit commands: `quit`, `exit`, `q`, `/exit`.
 
-### Example Interactions
+## Configuration
 
-```
-👤 User: 이 계약서가 법적으로 유효한지 확인해줘
-🤖 Assistant: [Analyzes PDF] → [Searches relevant laws] → 
-          민법 제103조에 따르면... 계약의 유효성은...
-
-👤 User: 계약서의 위약금 조항이 적법한가요?
-🤖 Assistant: [Examines penalty clauses in PDF] → [Retrieves relevant statutes] →
-          민법 제398조제2항에 의하면 손해배상액의 예정은...
-```
-
-### Exit Commands
-- `quit`, `exit`, `q`, or `/exit` to terminate the session
-
-## 🔧 Configuration
-
-### PDF Processing Configuration
-Located in `call_functions/pdf_reader_chroma.py`:
+PDF config (`PDFConfig` in `pdf_reader_chroma.py`):
 ```python
-@dataclass
-class PDFConfig:
-    chunk_size: int = 1024          # Size of text chunks
-    chunk_overlap: int = 100        # Overlap between chunks
-    max_content_length: int = 500   # Max display length
-    collection_name: str = "pdf_documents"
-    search_k: int = 5               # Number of results to retrieve
+chunk_size = 1024
+chunk_overlap = 100
+max_content_length = 500
+collection_name = "pdf_documents"
+search_k = 5
 ```
 
-### Law API Configuration
-Located in `call_functions/law_api.py`:
+Law config (`LawConfig` in `law_api.py`):
 ```python
-@dataclass
-class LawConfig:
-    chunk_size: int = 1024
-    chunk_overlap: int = 100
-    max_articles: int = 50          # Max articles to process
-    search_threshold: int = 2       # Minimum relevant results
-    timeout: int = 10               # API timeout in seconds
+chunk_size = 1024
+chunk_overlap = 100
+max_articles = 50
+search_threshold = 2
+timeout = 10
 ```
 
-## 🔍 How It Works
+## How It Works
 
-1. **PDF Loading**: When you start the application, it prompts you to select a PDF file
-2. **Document Chunking**: The PDF is split into manageable chunks for processing
-3. **Local Embedding**: Chunks are embedded using local sentence-transformers
-4. **Vector Storage**: Embeddings are stored in ChromaDB for efficient retrieval
-5. **Query Processing**:
-   - User asks a question about the PDF
-   - System searches relevant content in the PDF
-   - System queries Korean law database for applicable statutes
-   - Response is generated with legal citations
-
-## 🛠️ Advanced Features
-
-### ChromaDB Persistence
-- PDF embeddings are stored in `database/pdf_chroma_db/`
-- Law embeddings are cached in `database/law_chroma_db/`
-- Persistent storage ensures fast retrieval on subsequent queries
-
-### Smart Caching
-- Law API responses are cached to minimize API calls
-- ChromaDB is checked first before making new API requests
-- Only fetches new laws when existing data is insufficient
-
-### Retriever Pattern
-- Uses vector similarity search for both PDF and law content
-- Configurable search parameters (k, similarity threshold)
-- Support for contextual compression (optional)
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-1. **ModuleNotFoundError**
-   - Ensure all dependencies are installed: `pip install -r requirements.txt`
-   - Check virtual environment is activated
-
-2. **Ollama Connection Error**
-   - Verify Ollama is running: `ollama serve`
-   - Check OLLAMA_SERVER_URL in `.env`
-
-3. **PDF Loading Issues**
-   - Ensure PDF files are in the `data/` directory
-   - Check file permissions
-
-4. **Embedding Errors**
-   - For "decode: cannot decode batches" error, the system uses custom embedding handlers
-   - Local embeddings for PDFs prevent batch processing issues
-
-## 📊 Performance Considerations
-
-- **Chunk Size**: Larger chunks (1024) provide more context but slower processing
-- **Local vs Remote Embeddings**: PDFs use local models for speed and privacy
-- **Caching**: Aggressive caching reduces API calls and improves response time
-
-## 🙏 Acknowledgments
-
-- [LangChain](https://www.langchain.com/) for the orchestration framework
-- [ChromaDB](https://www.trychroma.com/) for vector storage
-- [Ollama](https://ollama.ai/) for local LLM deployment
-- Korean National Law Information Center for legal data API
-
-
----
-
-**Note**: This system is designed for educational and analytical purposes. Always consult with qualified legal professionals for actual legal advice.
+1. PDF load and page extraction
+2. Recursive chunking and local embedding
+3. Vector persistence in ChromaDB
+4. Query: retrieve PDF context + relevant statutes
+5. Answer synthesis with cited articles

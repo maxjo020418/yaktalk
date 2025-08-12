@@ -8,13 +8,26 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import os
+import sys
+import requests
+import json
+from pathlib import Path
+
+# 모듈 경로 추가
+sys.path.append(str(Path(__file__).parent.parent))
+
+from utils.get_env import OPEN_LAW_GO_ID
+
 def test_law_api():
-    print("🧪 국가법령정보센터 API 테스트")
-    print("=" * 50)
+    """
+    법령 정보 API 기본 연결 테스트
+    """
+    print("🔍 법령 API 연결 테스트 시작")
     
     # 문서에 따르면 OC는 사용자 이메일 ID (예: test)
     # 실제 서비스에서는 정식 키 필요하지만 테스트는 가능
-    api_key = os.getenv("OPEN_LAW_GO_ID", "test")  # 기본값 'test' 사용
+    api_key = OPEN_LAW_GO_ID
     
     print(f"✅ OC 값 사용: {api_key}")
     

@@ -50,9 +50,13 @@ def get_pdf_embeddings():
     """Get local embeddings for PDF processing"""
     return LocalEmbeddings()
 
-def get_law_embeddings(base_url: str, model: str = "nomic-embed-text"):
+def get_law_embeddings(server_url: str, model_name: str):
     """Get Ollama embeddings for law processing"""
+    # Handle missing URL scheme
+    if not server_url.startswith(('http://', 'https://')):
+        server_url = f"https://{server_url}"
+    
     return SafeOllamaEmbeddings(
-        base_url=base_url,
-        model=model
+        base_url=server_url,
+        model=model_name
     )
