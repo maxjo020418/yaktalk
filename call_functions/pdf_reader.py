@@ -16,11 +16,9 @@ from langchain_core.tools import tool
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyMuPDFLoader
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import LLMChainExtractor
-import chromadb
-from chromadb.config import Settings
 
 from utils.custom_embeddings import get_pdf_embeddings
 
@@ -84,24 +82,24 @@ class PDFVectorStore:
         persist_directory = Path(__file__).parent.parent / "database" / "pdf_chroma_db"
         persist_directory.mkdir(parents=True, exist_ok=True)
         
-        client = chromadb.PersistentClient(
-            path=str(persist_directory),
-            settings=Settings(anonymized_telemetry=False)
-        )
-        
-        # 기존 컬렉션 삭제 (새로운 PDF용)
-        try:
-            client.delete_collection(name=self.config.collection_name)
-        except:
-            pass
-        
-        # 벡터스토어 생성
+        # 벡터스토어 생성 (새로운 langchain-chroma API)
         self.vectorstore = Chroma(
-            client=client,
             collection_name=self.config.collection_name,
             embedding_function=embeddings,
             persist_directory=str(persist_directory)
         )
+        
+        # 기존 컬렉션의 문서들을 모두 삭제 (새로운 PDF용)
+        try:
+            self.vectorstore.delete_collection()
+            # 컬렉션 재생성
+            self.vectorstore = Chroma(
+                collection_name=self.config.collection_name,
+                embedding_function=embeddings,
+                persist_directory=str(persist_directory)
+            )
+        except Exception as e:
+            print(f"컬렉션 삭제 중 오류 (무시됨): {e}")
         
         # 문서 추가
         self.vectorstore.add_documents(splits)
@@ -148,11 +146,17 @@ class PDFVectorStore:
             print("ChromaDB가 초기화되지 않았습니다.")
             return {}
         
-        collection = self.vectorstore._collection
+        try:
+            # langchain-chroma의 새로운 API 사용
+            collection_count = len(self.vectorstore.get())
+        except Exception as e:
+            print(f"컬렉션 정보 조회 중 오류: {e}")
+            collection_count = 0
+        
         return {
             'pdf_file': os.path.basename(self.pdf_file_path) if self.pdf_file_path else 'Unknown',
-            'total_chunks': collection.count(),
-            'collection_name': collection.name,
+            'total_chunks': collection_count,
+            'collection_name': self.config.collection_name,
             'storage_type': 'ChromaDB (Persistent)'
         }
 

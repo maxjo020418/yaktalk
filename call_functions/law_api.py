@@ -15,10 +15,8 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from langchain_core.tools import tool
 from langchain_core.documents import Document
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-import chromadb
-from chromadb.config import Settings
 
 from utils.custom_embeddings import get_law_embeddings
 from utils.get_env import OLLAMA_SERVER_URL, OPEN_LAW_GO_ID
@@ -101,6 +99,7 @@ class LawAPIClient:
         try:
             response = requests.get(url, params=params, timeout=self.config.timeout)
             if response.status_code == 200:
+                print(f"request success: {response.request.url}")
                 return response.json()
         except Exception as e:
             print(f"API 호출 실패: {e}")
@@ -149,20 +148,30 @@ class LawDocumentProcessor:
     
     def _create_basic_info(self, law_info: Dict) -> Document:
         """법령 기본 정보 문서 생성"""
+        # 기본정보가 중첩되어 있는 경우 처리
+        basic_info = law_info.get('기본정보', law_info)
+        
+        # 소관부처 정보 처리 - 중첩된 객체인 경우와 단순 문자열인 경우 모두 처리
+        department = basic_info.get('소관부처')
+        if isinstance(department, dict):
+            department_name = department.get('content', 'N/A')
+        else:
+            department_name = department or basic_info.get('소관부처명', 'N/A')
+        
         content = f"""
-        법령명: {law_info.get('법령명_한글', 'N/A')}
-        법령ID: {law_info.get('법령ID', 'N/A')}
-        공포일자: {law_info.get('공포일자', 'N/A')}
-        시행일자: {law_info.get('시행일자', 'N/A')}
-        소관부처: {law_info.get('소관부처명', 'N/A')}
+        법령명: {basic_info.get('법령명_한글', 'N/A')}
+        법령ID: {basic_info.get('법령ID', 'N/A')}
+        공포일자: {basic_info.get('공포일자', 'N/A')}
+        시행일자: {basic_info.get('시행일자', 'N/A')}
+        소관부처: {department_name}
         """
         
         return Document(
             page_content=content.strip(),
             metadata={
                 'type': 'law_basic',
-                'law_id': law_info.get('법령ID', ''),
-                'law_name': law_info.get('법령명_한글', '')
+                'law_id': basic_info.get('법령ID', ''),
+                'law_name': basic_info.get('법령명_한글', '')
             }
         )
     
@@ -170,22 +179,28 @@ class LawDocumentProcessor:
         """조문 정보 문서들 생성"""
         documents = []
         
-        if '조문' not in law_info:
-            return documents
+        # 조문 구조 처리: 조문.조문단위 또는 직접 조문
+        articles_container = law_info.get('조문', {})
+        if isinstance(articles_container, dict) and '조문단위' in articles_container:
+            articles = articles_container['조문단위']
+        else:
+            articles = law_info.get('조문', [])
             
-        articles = law_info.get('조문', [])
         if isinstance(articles, dict):
             articles = [articles]
         
+        # 기본정보에서 법령 정보 가져오기
+        basic_info = law_info.get('기본정보', law_info)
+        
         for article in articles[:self.config.max_articles]:
             if isinstance(article, dict):
-                doc = self._create_single_article_document(article, law_info)
+                doc = self._create_single_article_document(article, basic_info)
                 if doc:
                     documents.append(doc)
         
         return documents
     
-    def _create_single_article_document(self, article: Dict, law_info: Dict) -> Optional[Document]:
+    def _create_single_article_document(self, article: Dict, basic_info: Dict) -> Optional[Document]:
         """단일 조문 문서 생성"""
         article_num = article.get('조문번호', '')
         article_title = article.get('조문제목', '')
@@ -206,8 +221,8 @@ class LawDocumentProcessor:
             page_content=content,
             metadata={
                 'type': 'law_article',
-                'law_id': law_info.get('법령ID', ''),
-                'law_name': law_info.get('법령명_한글', ''),
+                'law_id': basic_info.get('법령ID', ''),
+                'law_name': basic_info.get('법령명_한글', ''),
                 'article_title': article_title,
                 'article_number': article_num,
                 'jo': article_info.jo,
@@ -223,32 +238,37 @@ class LawVectorStore:
     def __init__(self, config: LawConfig | None = None):
         self.config = config or LawConfig()
         self.processor = LawDocumentProcessor(config)
+        self.vectorstore = None
         self._initialize()
     
     def _initialize(self):
         """벡터스토어 초기화"""
-        embeddings = get_law_embeddings(OLLAMA_SERVER_URL, "nomic-embed-text")
-        
-        persist_directory = Path(__file__).parent.parent / "database" / "law_chroma_db"
-        persist_directory.mkdir(parents=True, exist_ok=True)
-        
-        client = chromadb.PersistentClient(
-            path=str(persist_directory),
-            settings=Settings(anonymized_telemetry=False)
-        )
-        
-        self.vectorstore = Chroma(
-            client=client,
-            collection_name="law_documents",
-            embedding_function=embeddings,
-            persist_directory=str(persist_directory)
-        )
+        try:
+            embeddings = get_law_embeddings(OLLAMA_SERVER_URL, "nomic-embed-text")
+            
+            persist_directory = Path(__file__).parent.parent / "database" / "law_chroma_db"
+            persist_directory.mkdir(parents=True, exist_ok=True)
+            
+            # langchain-chroma의 새로운 API 사용
+            self.vectorstore = Chroma(
+                collection_name="law_documents",
+                embedding_function=embeddings,
+                persist_directory=str(persist_directory)
+            )
 
-        assert self.vectorstore is not None, f"Vectorstore must be initialized"
-        print(f"✅ 법령 ChromaDB 초기화 완료: {persist_directory}")
+            assert self.vectorstore is not None, f"Vectorstore must be initialized"
+            print(f"✅ 법령 ChromaDB 초기화 완료: {persist_directory}")
+        except Exception as e:
+            print(f"⚠️ 법령 ChromaDB 초기화 실패: {e}")
+            print("환경 설정을 확인해주세요. (OLLAMA_SERVER_URL, 모델 가용성 등)")
+            self.vectorstore = None
     
     def add_law_data(self, law_data: Dict) -> int:
         """법령 데이터를 벡터스토어에 추가"""
+        if not self.vectorstore:
+            print("❌ 벡터스토어가 초기화되지 않았습니다.")
+            return 0
+            
         documents = self.processor.create_law_documents(law_data)
         
         if not documents:
@@ -264,7 +284,6 @@ class LawVectorStore:
         splits = text_splitter.split_documents(documents)
         
         if splits:
-            assert self.vectorstore is not None, "Vectorstore must be initialized before adding documents"
             self.vectorstore.add_documents(splits)
             print(f"✅ {len(splits)}개의 법령 청크 추가 완료")
         
@@ -272,7 +291,10 @@ class LawVectorStore:
     
     def search(self, query: str, k: int = 5) -> List[Document]:
         """벡터스토어에서 검색"""
-        assert self.vectorstore is not None, "Vectorstore must be initialized before searching"
+        if not self.vectorstore:
+            print("❌ 벡터스토어가 초기화되지 않았습니다.")
+            return []
+            
         retriever = self.vectorstore.as_retriever(
             search_type="similarity",
             search_kwargs={"k": k}
@@ -353,14 +375,36 @@ class LawService:
         
         if law_data and '법령' in law_data:
             law_info = law_data['법령']
+            # 기본정보에서 정보 추출
+            basic_info = law_info.get('기본정보', law_info)
+            
+            # 소관부처 정보 처리
+            department = basic_info.get('소관부처')
+            if isinstance(department, dict):
+                department_name = department.get('content', 'N/A')
+            else:
+                department_name = department or basic_info.get('소관부처명', 'N/A')
+                
+            # 조문 수 계산
+            articles_container = law_info.get('조문', {})
+            if isinstance(articles_container, dict) and '조문단위' in articles_container:
+                articles = articles_container['조문단위']
+            else:
+                articles = law_info.get('조문', [])
+            
+            if isinstance(articles, dict):
+                articles = [articles]
+                
+            article_count = len(articles) if isinstance(articles, list) else 0
+            
             self.vector_store.add_law_data(law_data)
 
-            return f"법령명: {law_info.get('법령명_한글', 'N/A')}" \
-                   f"\n법령ID: {law_info.get('법령ID', 'N/A')}" \
-                   f"\n공포일자: {law_info.get('공포일자', 'N/A')}" \
-                   f"\n시행일자: {law_info.get('시행일자', 'N/A')}" \
-                   f"\n소관부처: {law_info.get('소관부처명', 'N/A')}" \
-                   f"\n조문 수: {len(law_info.get('조문', []))}개" \
+            return f"법령명: {basic_info.get('법령명_한글', 'N/A')}" \
+                   f"\n법령ID: {basic_info.get('법령ID', 'N/A')}" \
+                   f"\n공포일자: {basic_info.get('공포일자', 'N/A')}" \
+                   f"\n시행일자: {basic_info.get('시행일자', 'N/A')}" \
+                   f"\n소관부처: {department_name}" \
+                   f"\n조문 수: {article_count}개" \
                    f"\n법령 정보가 벡터스토어에 저장되었습니다.".strip()
         
         return "법령 정보를 찾을 수 없습니다."
@@ -368,17 +412,19 @@ class LawService:
     def _fetch_law_data_by_query(self, query: str) -> Optional[Dict]:
         """쿼리로 법령 데이터 가져오기"""
         # 먼저 검색으로 법령 찾기
-        search_result = self.api_client.search_laws(query)
-        
+        search_result = self.api_client.search_laws(query) or {}
+        search_result = search_result.get('LawSearch', [])
+
         if search_result and 'law' in search_result:
             laws = search_result.get('law', [])
             if laws:
-                first_law = laws[0]
+                first_law = laws[0]  # only the first one
                 law_id = first_law.get('법령ID')
                 if law_id:
                     # 상세 정보 가져오기
                     return self.api_client.get_law_by_id(law_id)
-        
+
+        print('⚠️ 법령 검색 결과가 없습니다. [_fetch_law_data_by_query]')
         return None
     
     def _format_results(self, docs: List[Document], prefix: str) -> str:
@@ -409,7 +455,8 @@ _law_service = LawService()
 @tool
 def search_law_by_query(query: str) -> str:
     """
-    Search for legal information and return relevant content.
+    Search online for legal information and return relevant content.
+    Use keywords.
     
     Args:
         query: Legal-related query to search
