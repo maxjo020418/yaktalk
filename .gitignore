@@ -6,6 +6,9 @@ __pycache__/
 .Python
 .venv/
 
+# chainlit
+.chainlit
+.files
 
 # IDE
 .vscode/
