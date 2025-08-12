@@ -1,6 +1,48 @@
-venv
-.idea
-.vscode
-__pycache__
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
 
+
+# IDE
+.vscode/
+.idea/
+
+# Environment
 .env
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+chroma.sqlite3
+
+# Logs
+*.log
+logs/
+*.out
+
+# Temporary files
+temp/
+tmp/
+.temp/
+
+# Model files
+models/
+*.bin
+*.pt
+*.pth
+*.onnx
+
+# Cache
+.cache/
+
+# OS specific
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+.claude

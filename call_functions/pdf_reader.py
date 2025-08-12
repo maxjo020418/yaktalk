@@ -1,112 +1,282 @@
-from langchain_core.tools import tool, InjectedToolArg
-from langchain_core.vectorstores import InMemoryVectorStore
+"""
+PDF 문서 처리 및 ChromaDB 저장 모듈
+"""
+
+import os
+import sys
+import warnings
+from pathlib import Path
+from typing import List, Optional
+from dataclasses import dataclass
+
+# 모듈 경로 추가 (직접 실행 시)
+sys.path.append(str(Path(__file__).parent.parent))
+
+from langchain_core.tools import tool
 from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-
 from langchain_community.document_loaders import PyMuPDFLoader
-from langchain_ollama import OllamaEmbeddings
-# from langchain_experimental.text_splitter import SemanticChunker
+from langchain_chroma import Chroma
+from langchain.retrievers import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors import LLMChainExtractor
 
-from utils.get_env import OLLAMA_SERVER_URL, DATA_DIR
+from utils.custom_embeddings import get_pdf_embeddings
 
-from typing import Annotated
-import warnings
-import tqdm
-# from kss import split_sentences
+warnings.filterwarnings("ignore")
 
-TOP_K = 4
 
-# Global vector store to avoid serialization issues between nodes
-vector_store: InMemoryVectorStore | None = None
+@dataclass
+class PDFConfig:
+    """PDF 처리 설정"""
+    chunk_size: int = 1024
+    chunk_overlap: int = 100
+    max_content_length: int = 500
+    collection_name: str = "pdf_documents"
+    search_k: int = 5
 
-def db_init(pdf_file_path: str, 
-            embed_model: str = "llama3.1:8b",
-            chunk_size: int = 512,
-            chunk_overlap: int = 20
-            ) -> InMemoryVectorStore:
-    """Initializes the vector store for the provided PDF file."""
-    global vector_store
-    embeddings = OllamaEmbeddings(
-        base_url=OLLAMA_SERVER_URL,
-        model=embed_model,
-        num_ctx=4096,
-    )
-    loader = PyMuPDFLoader(pdf_file_path)
-    docs = loader.load()
 
-    with open(DATA_DIR + '/debug_data/' + pdf_file_path.split("/")[-1][:-3] + ".txt", 
-              "w") as f:
-        f.write('\n\n'.join([doc.page_content for doc in docs]))
-
-    splitter = RecursiveCharacterTextSplitter(  # SpaCy's ko_core_news_sm doesn't seem to work...
-        separators=[
-            "\n\n", # "\n",
-            ".",
-            # ",",
-            # "\u200b",  # Zero-width space
-            # "\uff0c",  # Fullwidth comma
-            # "\u3001",  # Ideographic comma
-            # "\uff0e",  # Fullwidth full stop
-            # "\u3002",  # Ideographic full stop
-        ],  
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        length_function=len,
-        is_separator_regex=False,
-    )
-
-    chunks = list()
-    for doc in docs:
-        if not doc.page_content.strip():
-            warnings.warn(f"Document {doc.metadata.get('source', 'unknown')} is empty.")
-            continue
-        chunks.extend(splitter.split_text(doc.page_content))
-
-    vector_store = None
-    for chunk in tqdm.tqdm(chunks, desc="Embedding documents"):
-        if vector_store is None:  # first document
-            vector_store = InMemoryVectorStore.from_texts([chunk], embedding=embeddings)
-        else:  # subsequent documents
-            vector_store.add_texts([chunk], embedding=embeddings)
+class PDFVectorStore:
+    """PDF 벡터 스토어 관리자"""
     
-    if vector_store: 
-        return vector_store
-    else: 
-        raise ValueError("Vector store initialization failed.")
+    def __init__(self, config: PDFConfig | None = None):
+        self.config = config or PDFConfig()
+        self.vectorstore: Optional[Chroma] = None
+        self.pdf_file_path: Optional[str] = None
+        self.retriever: Optional[ContextualCompressionRetriever] = None
+    
+    def initialize(self, pdf_file_path: str) -> None:
+        """PDF를 로드하여 ChromaDB 초기화"""
+        self.pdf_file_path = pdf_file_path
+        
+        # PDF 로드
+        documents = self._load_pdf_documents(pdf_file_path)
+        
+        # 문서 분할
+        splits = self._split_documents(documents)
+        
+        # 벡터스토어 초기화
+        self._initialize_vectorstore(splits)
+        
+        print(f"✅ PDF ChromaDB 초기화 완료: {len(splits)}개 청크, {os.path.basename(pdf_file_path)}")
+    
+    def _load_pdf_documents(self, pdf_file_path: str) -> List[Document]:
+        """PDF 문서 로드"""
+        loader = PyMuPDFLoader(pdf_file_path)
+        return loader.load()
+    
+    def _split_documents(self, documents: List[Document]) -> List[Document]:
+        """문서를 청크로 분할"""
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.config.chunk_size,
+            chunk_overlap=self.config.chunk_overlap,
+            separators=["\n\n", "\n", ".", " ", ""]
+        )
+        return text_splitter.split_documents(documents)
+    
+    def _initialize_vectorstore(self, splits: List[Document]) -> None:
+        """벡터스토어 초기화 및 문서 추가"""
+        # 로컬 임베딩 사용
+        embeddings = get_pdf_embeddings()
+        
+        # ChromaDB 클라이언트 생성
+        persist_directory = Path(__file__).parent.parent / "database" / "pdf_chroma_db"
+        persist_directory.mkdir(parents=True, exist_ok=True)
+        
+        # 벡터스토어 생성 (새로운 langchain-chroma API)
+        self.vectorstore = Chroma(
+            collection_name=self.config.collection_name,
+            embedding_function=embeddings,
+            persist_directory=str(persist_directory)
+        )
+        
+        # 기존 컬렉션의 문서들을 모두 삭제 (새로운 PDF용)
+        try:
+            self.vectorstore.delete_collection()
+            # 컬렉션 재생성
+            self.vectorstore = Chroma(
+                collection_name=self.config.collection_name,
+                embedding_function=embeddings,
+                persist_directory=str(persist_directory)
+            )
+        except Exception as e:
+            print(f"컬렉션 삭제 중 오류 (무시됨): {e}")
+        
+        # 문서 추가
+        self.vectorstore.add_documents(splits)
+    
+    def get_retriever(self, llm=None, use_compression: bool = False):
+        """리트리버 반환 (압축 옵션)"""
+        if not self.is_initialized() or not self.vectorstore:
+            raise ValueError("ChromaDB가 초기화되지 않았습니다. initialize()를 먼저 호출하세요.")
+        
+        base_retriever = self.vectorstore.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": self.config.search_k}
+        )
+        
+        if use_compression and llm:
+            compressor = LLMChainExtractor.from_llm(llm)
+            self.retriever = ContextualCompressionRetriever(
+                base_compressor=compressor,
+                base_retriever=base_retriever
+            )
+            return self.retriever
+        
+        return base_retriever
+    
+    def search(self, query: str) -> List[Document]:
+        """벡터스토어에서 검색"""
+        if not self.is_initialized():
+            return []
+        
+        retriever = self.get_retriever(use_compression=False)
+        try:
+            return retriever.invoke(query) or []
+        except Exception as e:
+            print(f"PDF 검색 오류: {e}")
+            return []
+    
+    def is_initialized(self) -> bool:
+        """초기화 상태 확인"""
+        return self.vectorstore is not None
+    
+    def get_metadata(self) -> dict:
+        """PDF 메타데이터 반환"""
+        if not self.is_initialized() or not self.vectorstore:
+            print("ChromaDB가 초기화되지 않았습니다.")
+            return {}
+        
+        try:
+            # langchain-chroma의 새로운 API 사용
+            collection_count = len(self.vectorstore.get())
+        except Exception as e:
+            print(f"컬렉션 정보 조회 중 오류: {e}")
+            collection_count = 0
+        
+        return {
+            'pdf_file': os.path.basename(self.pdf_file_path) if self.pdf_file_path else 'Unknown',
+            'total_chunks': collection_count,
+            'collection_name': self.config.collection_name,
+            'storage_type': 'ChromaDB (Persistent)'
+        }
 
 
-def initialize_vector_store(pdf_file_path: str, 
-                          embed_model: str = "llama3.1:8b",
-                          chunk_size: int = 512,
-                          chunk_overlap: int = 20) -> None:
-    """Initialize the global vector store."""
-    global vector_store
-    vector_store = db_init(pdf_file_path, embed_model, chunk_size, chunk_overlap)
+class PDFService:
+    """PDF 서비스 메인 클래스"""
+    
+    def __init__(self):
+        self.config = PDFConfig()
+        self.vector_store = PDFVectorStore(self.config)
+    
+    def initialize_pdf(self, pdf_file_path: str) -> None:
+        """PDF 초기화"""
+        self.vector_store.initialize(pdf_file_path)
+    
+    def search_content(self, query: str) -> str:
+        """PDF 내용 검색"""
+        if not self.vector_store.is_initialized():
+            return "PDF가 로드되지 않았습니다. 먼저 PDF를 로드해주세요."
+        
+        docs = self.vector_store.search(query)
+        
+        if not docs:
+            return "관련 내용을 찾을 수 없습니다."
+        
+        return self._format_search_results(docs)
+    
+    def get_metadata(self) -> str:
+        """PDF 메타데이터 반환"""
+        if not self.vector_store.is_initialized():
+            return "PDF가 로드되지 않았습니다."
+        
+        metadata = self.vector_store.get_metadata()
+
+        s = f"PDF 파일: {metadata['pdf_file']}\n" \
+            f"총 청크 수: {metadata['total_chunks']}\n" \
+            f"컬렉션 이름: {metadata['collection_name']}\n" \
+            f"저장 방식: {metadata['storage_type']}\n"
+        
+        return s.strip()
+    
+    def _format_search_results(self, docs: List[Document]) -> str:
+        """검색 결과 포맷팅"""
+        results = []
+        
+        for i, doc in enumerate(docs, 1):
+            page_num = doc.metadata.get('page', 'Unknown')
+            content = doc.page_content[:self.config.max_content_length]
+            
+            # 내용이 잘렸는지 표시
+            if len(doc.page_content) > self.config.max_content_length:
+                content += "..."
+            
+            results.append(f"[검색결과 {i} - 페이지 {page_num}]\n{content}")
+        
+        return "\n\n".join(results)
+    
+    def is_initialized(self) -> bool:
+        """초기화 상태 확인"""
+        return self.vector_store.is_initialized()
 
 
-def is_vector_store_initialized() -> bool:
-    """Check if the vector store is initialized."""
-    return vector_store is not None
+# 전역 서비스 인스턴스
+_pdf_service = PDFService()
+
+
+# 기존 함수들 (하위 호환)
+def initialize_chromadb(
+    pdf_file_path: str,
+    embed_model: str = "nomic-embed-text",
+    chunk_size: int = 1024,
+    chunk_overlap: int = 100,
+    collection_name: str = "pdf_documents"
+) -> None:
+    """ChromaDB 초기화 (하위 호환성)"""
+    global _pdf_service
+    
+    # 설정 업데이트
+    _pdf_service.config.chunk_size = chunk_size
+    _pdf_service.config.chunk_overlap = chunk_overlap
+    _pdf_service.config.collection_name = collection_name
+    
+    # PDF 초기화
+    _pdf_service.initialize_pdf(pdf_file_path)
+
+
+def get_retriever(llm=None, use_compression: bool = False):
+    """리트리버 반환 (하위 호환성)"""
+    return _pdf_service.vector_store.get_retriever(llm, use_compression)
+
+
+def is_chromadb_initialized() -> bool:
+    """초기화 상태 확인 (하위 호환성)"""
+    return _pdf_service.is_initialized()
 
 
 @tool
-def query_pdf(query: str, reason: str) -> list[Document | str] | None:
+def search_pdf_content(query: str) -> str:
     """
-    Queries existing PDF file using the vector store.
+    Search for relevant content in the PDF.
     
-    :param query: vector query string to search in the PDF file
-    :type query: str
-    :param reason: why the query is being made in 1 sentence
-    :type reason: str
-    :return: Description
+    Args:
+        query: Search query
+    
+    Returns:
+        Relevant PDF content
     """
-    global vector_store
-    if vector_store is None:
-        raise ValueError("Vector store is not initialized. Initialize it first.")
-    
-    docs = vector_store.similarity_search(query, k=TOP_K)
-    return docs + ["Query Reason: " + reason] if docs else None
+    return _pdf_service.search_content(query)
 
 
-tools = [query_pdf]
-tool_map = {t.name: t for t in tools}
+@tool
+def get_pdf_metadata() -> str:
+    """
+    Return metadata of the currently loaded PDF.
+    
+    Returns:
+        PDF metadata information
+    """
+    return _pdf_service.get_metadata()
+
+
+# Export tools
+tools = [search_pdf_content, get_pdf_metadata]

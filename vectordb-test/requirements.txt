@@ -1,4 +1,0 @@
-ollama
-numpy
-scikit-learn
-requests
