@@ -20,7 +20,7 @@ def _normalize(text: str) -> str:
     """
     text = text.lower()
     text = re.sub(r"[^\w\s]", "", text)
-    return re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", text)#.strip()
 
 
 def _normalize_for_pdf_search(text: str) -> str:
@@ -35,7 +35,7 @@ def _normalize_for_pdf_search(text: str) -> str:
     # Replace multiple whitespace (including line breaks) with single space
     text = re.sub(r"\s+", " ", text)
     # Also create a version without any spaces for fallback matching
-    return text.strip()
+    return text#.strip()
 
 
 def highlight_pdf(
@@ -183,8 +183,6 @@ def highlight_pdf(
         for quad in quads:
             page.add_highlight_annot(quad)
             highlights_added = True
-
-    doc.close()
     
     if not highlights_added:
         return f"ERROR: Could not find the requested text to highlight in the PDF. Please verify the text exists and try again with exact text from the PDF."
@@ -193,6 +191,7 @@ def highlight_pdf(
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"highlighted_{Path(pdf_path).name}"
     doc.save(str(output_path))
+    doc.close()
     return str(output_path)
 
 

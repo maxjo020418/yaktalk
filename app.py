@@ -147,7 +147,7 @@ class ChainlitLawChatbot:
             "5. If no PDF is loaded: Inform user to upload a PDF document first "
             "IMPORTANT: The PDF is only the subject of analysis, NOT the basis for answers. "
             "All legal judgments and advice must cite specific legal provisions via search_law_by_query. (if failed, make it known)"
-            "IMPORTANT: When highlighting text, make sure to use the exact text snippet found in the PDF and correct page number (0-indexed). "
+            "When highlighting text, make sure to use the exact text snippet found in the PDF and correct page number (0-indexed). "
             "ALWAYS respond in Korean language, but follow these English instructions."
         )
         
@@ -288,10 +288,6 @@ class ChainlitLawChatbot:
                     if node_name == "initialize":
                         async with cl.Step(name=f"🔧 시스템 시작", type="run") as init_step:
                             init_step.input = "시스템 준비 상태 확인"
-                            # await cl.Message(
-                            #     content="✅ PDF 문서와 법령 데이터베이스 연결 상태를 확인합니다.",
-                            #     parent_id=init_step.id
-                            # ).send()
                             init_step.output = "시스템 준비 완료"
                         step_count += 1
                     
@@ -301,37 +297,13 @@ class ChainlitLawChatbot:
                             # AI 추론 및 도구 선택 단계
                             async with cl.Step(name=f"🤖 추론 및 도구 선택", type="run") as reasoning_step:
                                 reasoning_step.input = user_input
-                                
                                 tool_names = [call["name"] for call in last_msg.tool_calls]
-                                # await cl.Message(
-                                #     content=f"💭 **사용자 질문 분석**: {user_input}\n\n"
-                                #            f"🎯 **AI 판단**: 이 질문에 답하기 위해 다음 도구가 필요합니다:",
-                                #     parent_id=reasoning_step.id
-                                # ).send()
-                                
-                                # 각 도구 호출에 대한 상세 정보
-                                # for i, tool_call in enumerate(last_msg.tool_calls, 1):
-                                #     await cl.Message(
-                                #         content=f"**도구 {i}**: `{tool_call['name']}`\n"
-                                #                f"**이유**: {'PDF 문서에서 관련 내용을 찾기 위해' if 'pdf' in tool_call['name'].lower() else '관련 법령을 검색하기 위해'}\n"
-                                #                f"**검색 매개변수**:\n```json\n{json.dumps(tool_call['args'], indent=2, ensure_ascii=False)}\n```",
-                                #         parent_id=reasoning_step.id
-                                #     ).send()
-                                
                                 reasoning_step.output = f"선택된 도구: {', '.join(tool_names)}"
                             step_count += 1
                         else:
                             # 최종 응답 생성 단계
                             async with cl.Step(name=f"✨ 최종 답변", type="run") as final_step:
                                 final_step.input = "수집된 모든 정보"
-                                # await cl.Message(
-                                #     content="🧠 모든 정보를 종합하여 최종 답변을 작성합니다...\n\n"
-                                #            "📋 **고려사항**:\n"
-                                #            "• PDF 문서의 내용\n"
-                                #            "• 관련 법령 조항\n"
-                                #            "• 법적 해석 및 조언",
-                                #     parent_id=final_step.id
-                                # ).send()
                                 final_response = last_msg.content
                                 final_step.output = "답변 생성 완료"
                             step_count += 1
@@ -373,23 +345,6 @@ class ChainlitLawChatbot:
                     elif node_name == "law_tools":
                         async with cl.Step(name=f"⚖️ 법령 데이터베이스 검색", type="tool") as law_step:
                             law_step.input = "관련 법령 조항 검색"
-                            
-                            # 도구 실행 전 메시지
-                            # await cl.Message(
-                            #     content="📚 법령 데이터베이스에서 관련 조항을 찾고 있습니다...",
-                            #     parent_id=law_step.id
-                            # ).send()
-                            
-                            # 법령 도구 실행 결과 상세 표시
-                            # ai_message = cast(AIMessage, value["messages"][-2] if len(value["messages"]) > 1 else last_msg)
-                            # if hasattr(ai_message, 'tool_calls') and ai_message.tool_calls:
-                            #     for tool_call in ai_message.tool_calls:
-                            #         if 'law' in tool_call['name'].lower():
-                            #             await cl.Message(
-                            #                 content=f"🔍 **검색어**: `{tool_call['args'].get('query', '알 수 없음')}`\n"
-                            #                        f"🔧 **실행 중인 도구**: `{tool_call['name']}`",
-                            #                 parent_id=law_step.id
-                            #             ).send()
                             
                             # 도구 결과 표시
                             if isinstance(last_msg, ToolMessage):
