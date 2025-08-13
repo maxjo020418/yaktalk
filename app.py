@@ -18,7 +18,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
 from utils.get_model import get_model
-from call_functions import pdf_reader, law_api
+from call_functions import pdf_reader, law_api, pdf_highlighter
 
 # Enable debug mode for development
 set_debug(True)
@@ -38,7 +38,8 @@ class ChainlitLawChatbot:
     """향상된 Chain of Thought를 가진 Chainlit용 법률 챗봇 클래스"""
     
     def __init__(self):
-        self.all_tools = pdf_reader.tools + law_api.tools
+        self.pdf_tools = pdf_reader.tools + pdf_highlighter.tools
+        self.all_tools = self.pdf_tools + law_api.tools
         self.llm = get_model(
             tools=self.all_tools,
             model="qwen3:14b",
@@ -167,7 +168,7 @@ class ChainlitLawChatbot:
         if not (hasattr(ai_message, 'tool_calls') and ai_message.tool_calls):
             return state
         
-        tool_node = ToolNode(tools=pdf_reader.tools)
+        tool_node = ToolNode(tools=self.pdf_tools)
         tool_response = tool_node.invoke({"messages": [ai_message]})
         
         # 도구 실행 결과를 메시지 리스트에 추가
@@ -208,7 +209,7 @@ class ChainlitLawChatbot:
             tool_names = [call["name"] for call in ai_message.tool_calls]
             
             # PDF 도구 확인
-            if any(name in ["search_pdf_content", "get_pdf_metadata"] for name in tool_names):
+            if any(name in ["search_pdf_content", "get_pdf_metadata", "highlight_snippet"] for name in tool_names):
                 return "pdf_tools"
             
             # 법령 도구 확인

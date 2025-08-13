@@ -42,3 +42,6 @@ chainlit>=1.0.0
 
 # Development tools
 typing-extensions>=4.8.0
+
+# Fuzzy string matching
+rapidfuzz>=3.0.0
