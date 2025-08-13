@@ -137,7 +137,7 @@ class ChainlitLawChatbot:
             "Workflow: "
             "1. If PDF is loaded: When user asks about PDF content, use search_pdf_content to examine the document "
             "2. Search for relevant laws using search_law_by_query based on the PDF content "
-            "3. Provide answers strictly based on legal statutes with article numbers "
+            "3. Provide answers strictly based on legal statutes with article numbers, highlight important or relevant information in the pdf. "
             "4. If no PDF is loaded: Inform user to upload a PDF document first "
             "IMPORTANT: The PDF is only the subject of analysis, NOT the basis for answers. "
             "All legal judgments and advice must cite specific legal provisions via search_law_by_query. (if failed, make it known)"
@@ -359,7 +359,7 @@ class ChainlitLawChatbot:
 
 
 # 전역 챗봇 인스턴스 (향상된 버전)
-enhanced_chatbot = ChainlitLawChatbot()
+chatbot = ChainlitLawChatbot()
 
 
 @cl.on_chat_start
@@ -388,7 +388,7 @@ async def on_message(message: cl.Message):
             import asyncio
             await asyncio.sleep(1)  # PDF 초기화 완료 대기
             
-            if enhanced_chatbot.current_pdf_file and pdf_reader.is_chromadb_initialized():
+            if chatbot.current_pdf_file and pdf_reader.is_chromadb_initialized():
                 await process_user_query_with_cot(message.content)
             else:
                 await cl.Message(
@@ -397,7 +397,7 @@ async def on_message(message: cl.Message):
         return
     
     # 일반 메시지 처리
-    if not enhanced_chatbot.current_pdf_file or not pdf_reader.is_chromadb_initialized():
+    if not chatbot.current_pdf_file or not pdf_reader.is_chromadb_initialized():
         await cl.Message(
             content="⚠️ PDF 문서를 먼저 업로드해주세요. 분석할 문서가 없습니다.",
         ).send()
@@ -411,7 +411,7 @@ async def process_user_query_with_cot(user_input: str):
     """Chain of Thought를 포함한 사용자 쿼리 처리 함수"""
     try:
         # 향상된 CoT로 메시지 처리
-        response = await enhanced_chatbot.process_message_with_cot(
+        response = await chatbot.process_message_with_cot(
             user_input, 
             pdf_initialized=True, 
             law_initialized=True
@@ -421,14 +421,17 @@ async def process_user_query_with_cot(user_input: str):
         if response:
             elements = []
             # PDF가 로드되어 있으면 인라인으로 첨부
-            if enhanced_chatbot.current_pdf_file and os.path.exists(enhanced_chatbot.current_pdf_file):
+            if chatbot.current_pdf_file and os.path.exists(chatbot.current_pdf_file):
                 elements.append(
                     cl.Pdf(
-                        name=os.path.basename(enhanced_chatbot.current_pdf_file),
-                        path=enhanced_chatbot.current_pdf_file,
-                        display="inline"
+                        name=os.path.basename(chatbot.current_pdf_file),
+                        path=chatbot.current_pdf_file,
+                        display="side"
                     )
                 )
+            
+            await cl.ElementSidebar.set_elements(elements)
+            await cl.ElementSidebar.set_title("PDF Preview")
             
             await cl.Message(
                 content=f"💬 **최종 답변**\n\n{response}",
@@ -485,7 +488,7 @@ async def handle_file_upload(elements: List):
                 await loading_msg.send()
                 
                 # PDF 초기화
-                result = await enhanced_chatbot.initialize_pdf(str(temp_file_path))
+                result = await chatbot.initialize_pdf(str(temp_file_path))
                 
                 # 결과 메시지
                 await loading_msg.remove()

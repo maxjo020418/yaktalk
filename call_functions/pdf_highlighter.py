@@ -30,10 +30,13 @@ def highlight_pdf(
     """
     doc = fitz.open(str(pdf_path))
 
+    print(f"Highlighting snippets in PDF: {spans}")
     for page_number, snippet in spans:
         page = doc[page_number]
         normalized_snippet = _normalize(snippet)
         quads = page.search_for(normalized_snippet, quads=True)
+
+        print(f"Search result: {quads}")
 
         if not quads:
             try:

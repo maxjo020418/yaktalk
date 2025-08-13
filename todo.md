@@ -8,3 +8,4 @@
     ```
     아마 그냥 `langchain_chroma.Chroma`로 다 바꿔야할 듯, `langchain_community`버전 지원 이미 종료했음
 6. FIXED ~~`_fetch_law_data_by_query` 계속 안됨, 어케 된건지?~~
+7. `is_sufficient_result`에서 threshold score 적용해야할 듯 (상위 뽑는거로 충분하진 않음)
