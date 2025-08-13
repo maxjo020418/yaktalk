@@ -53,10 +53,11 @@ def highlight_pdf(
     """
     doc = fitz.open(str(pdf_path))
     highlights_added = False
+    spans_list = list(spans)  # Convert to list to allow multiple iterations
 
     print(f"doc page count: {doc.page_count}")
-    print(f"Highlighting snippets in PDF: {spans}")
-    for page_number, snippet in spans:
+    print(f"Highlighting snippets in PDF: {spans_list}")
+    for page_number, snippet in spans_list:
         page = doc.load_page(page_number)
         
         # Normalize snippet for comparison
@@ -189,20 +190,53 @@ def highlight_pdf(
 
     output_dir = Path("data/temp")
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"highlighted_{Path(pdf_path).name}"
-    doc.save(str(output_path))
+    
+    # Always use the original PDF name for the output, not the potentially already-highlighted version
+    original_pdf_name = Path(pdf_path).name
+    if original_pdf_name.startswith("highlighted_"):
+        original_pdf_name = original_pdf_name[12:]  # Remove "highlighted_" prefix
+    
+    output_path = output_dir / f"highlighted_{original_pdf_name}"
+    
+    # If we're saving to the same file we opened, use incremental save
+    if str(output_path) == str(pdf_path):
+        try:
+            doc.saveIncr()
+        except Exception as e:
+            # If incremental save fails, save to a temporary file and then move it
+            temp_path = output_dir / f"temp_highlighted_{original_pdf_name}"
+            doc.save(str(temp_path))
+            doc.close()
+            # Move the temp file to the final location
+            import shutil
+            shutil.move(str(temp_path), str(output_path))
+            return str(output_path)
+    else:
+        doc.save(str(output_path))
+    
     doc.close()
     return str(output_path)
 
 
 @tool
-def highlight_snippet(page_number: int, snippet: str) -> str:
-    """Highlights text snippet in the currently loaded PDF."""
+def highlight_pdf(page_number: int, snippet: str) -> str:
+    """
+    Highlights snippet in the currently loaded PDF.
+    (Do not edit the original text or add omission '...' dots)
+    """
     pdf_path = getattr(pdf_reader._pdf_service.vector_store, "pdf_file_path", None)
     if not pdf_path:
         return "No PDF loaded"
     
-    result = highlight_pdf(pdf_path, [(page_number, snippet)])
+    # Check if there's already a highlighted version - if so, use that as source
+    output_dir = Path("data/temp")
+    original_pdf_name = Path(pdf_path).name
+    highlighted_path = output_dir / f"highlighted_{original_pdf_name}"
+    
+    # Use existing highlighted version if it exists, otherwise use original
+    source_pdf = str(highlighted_path) if highlighted_path.exists() else pdf_path
+    
+    result = highlight_pdf(source_pdf, [(page_number, snippet)])
     
     # Check if it's an error message
     if result.startswith("ERROR:"):
@@ -216,4 +250,4 @@ def highlight_snippet(page_number: int, snippet: str) -> str:
 
 
 # Export tools (for consistency with other modules)
-tools = [highlight_snippet]
+tools = [highlight_pdf]
