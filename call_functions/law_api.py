@@ -31,6 +31,7 @@ class LawConfig:
     chunk_overlap: int = 100
     max_articles: int = 50
     search_threshold: int = 2
+    max_distance_score: float = 350.0  # 최대 거리 점수 (낮을수록 유사) - Ollama embeddings scale
     timeout: int = 10
 
 
@@ -301,18 +302,34 @@ class LawVectorStore:
         )
         return retriever.invoke(query) or []
     
-    def is_sufficient_result(self, docs: List[Document], query: str) -> bool:
-        """검색 결과가 충분한지 판단"""
-        if not docs or len(docs) < self.config.search_threshold:
+    def search_with_scores(self, query: str, k: int = 5) -> List[tuple[Document, float]]:
+        """벡터스토어에서 점수와 함께 검색"""
+        if not self.vectorstore:
+            print("❌ 벡터스토어가 초기화되지 않았습니다.")
+            return []
+        
+        # Ollama embeddings에서는 similarity_search_with_score가 더 안정적
+        return self.vectorstore.similarity_search_with_score(query, k=k) or []
+    
+    def is_sufficient_result(self, docs_with_scores: List[tuple[Document, float]], query: str) -> bool:
+        """검색 결과가 충분한지 판단 (점수 기반)"""
+        if not docs_with_scores or len(docs_with_scores) < self.config.search_threshold:
+            print(f"🔍 결과 부족: {len(docs_with_scores) if docs_with_scores else 0}개 (최소 {self.config.search_threshold}개 필요)")
             return False
         
-        query_keywords = set(query.lower().split())
-        relevant_count = sum(
-            1 for doc in docs 
-            if any(keyword in doc.page_content.lower() for keyword in query_keywords)
-        )
+        # 거리 점수가 충분히 낮은(유사한) 결과가 충분한지 확인
+        # 거리가 작을수록 더 유사함 (0에 가까울수록 더 유사)
+        high_quality_results = [
+            (doc, score) for doc, score in docs_with_scores 
+            if score <= self.config.max_distance_score  # 거리 점수가 임계값보다 낮음(더 유사)
+        ]
         
-        return relevant_count >= self.config.search_threshold
+        print(f"🔍 점수 평가: {len(high_quality_results)}개 상위 결과 (거리 ≤{self.config.max_distance_score})")
+        if docs_with_scores:
+            scores = [score for _, score in docs_with_scores[:3]]
+            print(f"🔍 상위 3개 점수: {scores}")
+        
+        return len(high_quality_results) >= self.config.search_threshold
 
 
 class LawService:
@@ -329,12 +346,15 @@ class LawService:
         """법령 검색 메인 로직"""
         print(f"🔍 법령 검색: '{query}'")
         
-        # 1단계: ChromaDB에서 기존 법령 검색
-        existing_docs = self.vector_store.search(query)
+        # 1단계: ChromaDB에서 기존 법령 검색 (점수와 함께)
+        existing_docs_with_scores = self.vector_store.search_with_scores(query)
         
         # 2단계: 검색 결과가 충분한지 확인
-        if self.vector_store.is_sufficient_result(existing_docs, query):
+        if self.vector_store.is_sufficient_result(existing_docs_with_scores, query):
             print("✅ ChromaDB에서 충분한 법령 정보 발견")
+            # 거리 점수 기반 정렬 (낮은 거리가 더 유사함)
+            existing_docs_with_scores.sort(key=lambda x: x[1])  # 거리 낮은 순 (더 유사한 순)
+            existing_docs = [doc for doc, score in existing_docs_with_scores[:5]]
             return self._format_results(existing_docs, "근거법령")
         
         # 3단계: API 호출로 새로운 법령 가져오기
@@ -358,9 +378,10 @@ class LawService:
                 return self._format_results(updated_docs, "새로 추가된 근거법령")
         
         # 최종 단계: 기존 결과라도 반환
-        if existing_docs:
+        if existing_docs_with_scores:
             print("⚠️ 새 법령 추가 실패, 기존 결과 반환")
-            return self._format_results(existing_docs[:3], "기존 근거법령")
+            existing_docs = [doc for doc, score in existing_docs_with_scores[:3]]
+            return self._format_results(existing_docs, "기존 근거법령")
         
         return "관련 법령 정보를 찾을 수 없습니다."
 
@@ -427,9 +448,15 @@ class LawService:
         print('⚠️ 법령 검색 결과가 없습니다. [_fetch_law_data_by_query]')
         return None
     
-    def _format_results(self, docs: List[Document], prefix: str) -> str:
+    def _format_results(self, docs: List[Document], prefix: str, show_scores: bool = False, docs_with_scores: Optional[List[tuple[Document, float]]] = None) -> str:
         """검색 결과를 포맷팅"""
         results = []
+        
+        # 점수 정보가 있으면 사용
+        if docs_with_scores:
+            score_map = {id(doc): score for doc, score in docs_with_scores}
+        else:
+            score_map = {}
         
         for i, doc in enumerate(docs[:5], 1):
             # 조항 정보 포맷팅
@@ -443,7 +470,13 @@ class LawService:
             article_ref = article_info.format_reference(law_name)
             content = doc.page_content[:500]
             
-            results.append(f"[{prefix} {i}] {article_ref}\n{content}")
+            # 점수 표시 (디버깅용)
+            score_info = ""
+            if show_scores and id(doc) in score_map:
+                score = score_map[id(doc)]
+                score_info = f" (점수: {score:.3f})"
+            
+            results.append(f"[{prefix} {i}]{score_info} {article_ref}\n{content}")
         
         return "\n\n".join(results)
 
@@ -456,8 +489,8 @@ _law_service = LawService()
 def search_law_by_query(query: str) -> str:
     """
     Search online for legal information and return relevant content.
-    Use keywords.
-    
+    Use clear and concise keywords.
+
     Args:
         query: Legal-related query to search
     

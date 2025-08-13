@@ -47,8 +47,18 @@ class SafeOllamaEmbeddings(OllamaEmbeddings):
         return embeddings
 
 def get_pdf_embeddings():
-    """Get local embeddings for PDF processing"""
-    return LocalEmbeddings()
+    """Get Ollama embeddings for PDF processing (using same model as law)"""
+    from utils.get_env import OLLAMA_SERVER_URL
+    server_url = OLLAMA_SERVER_URL
+    
+    # Handle missing URL scheme
+    if not server_url.startswith(('http://', 'https://')):
+        server_url = f"https://{server_url}"
+    
+    return SafeOllamaEmbeddings(
+        base_url=server_url,
+        model="nomic-embed-text"
+    )
 
 def get_law_embeddings(server_url: str, model_name: str):
     """Get Ollama embeddings for law processing"""
