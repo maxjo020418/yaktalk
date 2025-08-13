@@ -489,15 +489,12 @@ _law_service = LawService()
 def search_law_by_query(query: str) -> str:
     """
     Search online for legal information and return relevant content.
-    Use clear and concise keywords.
-
-    Args:
-        query: Legal-related query to search
+    Use only one or two keywords to query.
     
     Returns:
         Relevant legal information
     """
-    return _law_service.search_laws(query)
+    return _law_service.search_laws(query.split()[0])
 
 
 @tool
