@@ -38,8 +38,9 @@ class ChainlitLawChatbot:
     """향상된 Chain of Thought를 가진 Chainlit용 법률 챗봇 클래스"""
     
     def __init__(self):
-        self.pdf_tools = pdf_reader.tools + pdf_highlighter.tools
-        self.all_tools = self.pdf_tools + law_api.tools
+        self.pdf_tools = pdf_reader.tools
+        self.pdf_highlighter_tools = pdf_highlighter.tools
+        self.all_tools = self.pdf_tools + self.pdf_highlighter_tools + law_api.tools
         self.llm = get_model(
             tools=self.all_tools,
             model="qwen3:14b",
@@ -47,6 +48,7 @@ class ChainlitLawChatbot:
         )
         self.graph = self._build_graph()
         self.current_pdf_file: Optional[str] = None
+        self.highlighted_pdf_file: Optional[str] = None
     
     def _build_graph(self) -> CompiledStateGraph:
         """LangGraph 빌드"""
@@ -56,6 +58,7 @@ class ChainlitLawChatbot:
         graph_builder.add_node("initialize", self._initialize_system)
         graph_builder.add_node("chatbot", self._chatbot)
         graph_builder.add_node("pdf_tools", self._process_pdf_tool)
+        graph_builder.add_node("pdf_highlighter_tools", self._process_pdf_highlighter_tool)
         graph_builder.add_node("law_tools", self._process_law_tool)
         
         # 엣지 설정
@@ -68,6 +71,7 @@ class ChainlitLawChatbot:
             self._route_tools,
             {
                 "pdf_tools": "pdf_tools",
+                "pdf_highlighter_tools": "pdf_highlighter_tools",
                 "law_tools": "law_tools", 
                 "end": END
             }
@@ -75,6 +79,7 @@ class ChainlitLawChatbot:
         
         # 도구 처리 후 다시 chatbot으로 - 피드백 루프 생성
         graph_builder.add_edge("pdf_tools", "chatbot")
+        graph_builder.add_edge("pdf_highlighter_tools", "chatbot")
         graph_builder.add_edge("law_tools", "chatbot")
         
         return graph_builder.compile(checkpointer=memory)
@@ -137,10 +142,12 @@ class ChainlitLawChatbot:
             "Workflow: "
             "1. If PDF is loaded: When user asks about PDF content, use search_pdf_content to examine the document "
             "2. Search for relevant laws using search_law_by_query based on the PDF content "
-            "3. Provide answers strictly based on legal statutes with article numbers, highlight important or relevant information in the pdf. "
-            "4. If no PDF is loaded: Inform user to upload a PDF document first "
+            "3. Provide answers strictly based on legal statutes with article numbers "
+            "4. Use highlight_snippet to highlight important or relevant information in the PDF by specifying the page number and text snippet to highlight "
+            "5. If no PDF is loaded: Inform user to upload a PDF document first "
             "IMPORTANT: The PDF is only the subject of analysis, NOT the basis for answers. "
             "All legal judgments and advice must cite specific legal provisions via search_law_by_query. (if failed, make it known)"
+            "IMPORTANT: When highlighting text, make sure to use the exact text snippet found in the PDF and correct page number (0-indexed). "
             "ALWAYS respond in Korean language, but follow these English instructions."
         )
         
@@ -180,6 +187,40 @@ class ChainlitLawChatbot:
             law_initialized=state["law_initialized"],
         )
     
+    def _process_pdf_highlighter_tool(self, state: MainState) -> MainState:
+        """PDF 하이라이터 도구 처리"""
+        last_message = state["messages"][-1]
+        ai_message = cast(AIMessage, last_message)
+        
+        if not (hasattr(ai_message, 'tool_calls') and ai_message.tool_calls):
+            return state
+        
+        tool_node = ToolNode(tools=self.pdf_highlighter_tools)
+        tool_response = tool_node.invoke({"messages": [ai_message]})
+        
+        # Check if a highlighted PDF was created or if there was an error
+        for message in tool_response["messages"]:
+            if isinstance(message, ToolMessage) and message.name == "highlight_snippet":
+                # Extract response from the tool
+                response_content = str(message.content).strip()
+                if response_content.startswith("ERROR:"):
+                    print(f"❌ Highlighting failed: {response_content}")
+                    # Error will be passed through to LLM for retry
+                elif response_content and "highlighted_" in response_content and os.path.exists(response_content):
+                    self.highlighted_pdf_file = response_content
+                    print(f"✅ Highlighted PDF saved: {response_content}")
+                else:
+                    print(f"⚠️ Unexpected highlighting response: {response_content}")
+        
+        # 도구 실행 결과를 메시지 리스트에 추가
+        new_messages = list(state["messages"]) + tool_response["messages"]
+        
+        return MainState(
+            messages=new_messages,
+            pdf_initialized=state["pdf_initialized"],
+            law_initialized=state["law_initialized"],
+        )
+    
     def _process_law_tool(self, state: MainState) -> MainState:
         """법령 도구 처리"""
         last_message = state["messages"][-1]
@@ -208,8 +249,12 @@ class ChainlitLawChatbot:
         if hasattr(ai_message, 'tool_calls') and ai_message.tool_calls:
             tool_names = [call["name"] for call in ai_message.tool_calls]
             
-            # PDF 도구 확인
-            if any(name in ["search_pdf_content", "get_pdf_metadata", "highlight_snippet"] for name in tool_names):
+            # PDF 하이라이터 도구 확인 (우선순위가 높음)
+            if any(name in ["highlight_snippet"] for name in tool_names):
+                return "pdf_highlighter_tools"
+            
+            # PDF 검색 도구 확인
+            if any(name in ["search_pdf_content", "get_pdf_metadata"] for name in tool_names):
                 return "pdf_tools"
             
             # 법령 도구 확인
@@ -296,28 +341,32 @@ class ChainlitLawChatbot:
                         async with cl.Step(name=f"📄 PDF 문서 검색", type="tool") as pdf_step:
                             pdf_step.input = "PDF 문서에서 관련 정보 검색"
                             
-                            # 도구 실행 전 메시지
-                            # await cl.Message(
-                            #     content="업로드된 PDF에서 관련 내용을 찾고 있습니다...",
-                            #     parent_id=pdf_step.id
-                            # ).send()
-                            
-                            # PDF 도구 실행 결과 상세 표시
-                            # ai_message = cast(AIMessage, value["messages"][-2] if len(value["messages"]) > 1 else last_msg)
-                            # if hasattr(ai_message, 'tool_calls') and ai_message.tool_calls:
-                            #     for tool_call in ai_message.tool_calls:
-                            #         if 'pdf' in tool_call['name'].lower():
-                            #             await cl.Message(
-                            #                 content=f"🔧 **실행 중인 도구**: `{tool_call['name']}`",
-                            #                 parent_id=pdf_step.id
-                            #             ).send()
-                            
                             # 도구 결과 표시
                             if isinstance(last_msg, ToolMessage):
                                 content_str = str(last_msg.content)
                                 pdf_step.output = f"PDF에서 관련 내용을 찾았습니다, ({len(content_str)})"
                             else:
                                 pdf_step.output = "PDF 검색 완료"
+                        step_count += 1
+                    
+                    # PDF 하이라이터 도구 실행 단계 - 별도 Step
+                    elif node_name == "pdf_highlighter_tools":
+                        async with cl.Step(name=f"🎨 PDF 텍스트 하이라이트", type="tool") as highlight_step:
+                            highlight_step.input = "PDF에서 중요한 부분 하이라이트"
+                            
+                            # 도구 결과 표시
+                            if isinstance(last_msg, ToolMessage):
+                                content_str = str(last_msg.content)
+                                if "highlighted_" in content_str and os.path.exists(content_str):
+                                    highlight_step.output = f"하이라이트된 PDF가 생성되었습니다: {os.path.basename(content_str)}"
+                                    await cl.Message(
+                                        content=f"🎨 **PDF 하이라이트 완료**: 중요한 텍스트가 하이라이트된 새 PDF를 생성했습니다.",
+                                        parent_id=highlight_step.id
+                                    ).send()
+                                else:
+                                    highlight_step.output = "PDF 하이라이트 처리 완료"
+                            else:
+                                highlight_step.output = "PDF 하이라이트 완료"
                         step_count += 1
                     
                     # 법령 도구 실행 단계 - 별도 Step
@@ -420,8 +469,18 @@ async def process_user_query_with_cot(user_input: str):
         # 최종 응답과 PDF 첨부 전송
         if response:
             elements = []
-            # PDF가 로드되어 있으면 인라인으로 첨부
-            if chatbot.current_pdf_file and os.path.exists(chatbot.current_pdf_file):
+            
+            # 하이라이트된 PDF가 있으면 우선적으로 표시
+            if chatbot.highlighted_pdf_file and os.path.exists(chatbot.highlighted_pdf_file):
+                elements.append(
+                    cl.Pdf(
+                        name=f"🎨 {os.path.basename(chatbot.highlighted_pdf_file)}",
+                        path=chatbot.highlighted_pdf_file,
+                        display="side"
+                    )
+                )
+            # 그렇지 않으면 원본 PDF 표시
+            elif chatbot.current_pdf_file and os.path.exists(chatbot.current_pdf_file):
                 elements.append(
                     cl.Pdf(
                         name=os.path.basename(chatbot.current_pdf_file),
