@@ -4,8 +4,11 @@ Comprehensive test script for Chroma refactor
 """
 
 import sys
+import os
 import tempfile
+import shutil
 from pathlib import Path
+from typing import List
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))

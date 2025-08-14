@@ -3,6 +3,7 @@
 """
 
 import requests
+import os
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -10,6 +11,7 @@ load_dotenv()
 import os
 import sys
 import requests
+import json
 from pathlib import Path
 
 # 모듈 경로 추가

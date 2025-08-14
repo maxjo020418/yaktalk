@@ -1,0 +1,24 @@
+[project]
+enable_telemetry = false
+
+[UI]
+name = "⚖️ 법률 AI 어시스턴트"
+description = "PDF 문서를 분석하여 관련 법령에 근거한 답변을 제공하는 AI 어시스턴트입니다."
+default_collapse_content = true
+default_expand_messages = true
+hide_cot = false
+show_readme_as_default = true
+
+[features]
+spontaneous_file_upload = {
+    enabled = true,
+    accept = {".pdf" = ["application/pdf"]},
+    max_files = 1,
+    max_size_mb = 50
+}
+
+[meta]
+generated_by = "1.0.0"
+
+[auth]
+enable_local_db = false

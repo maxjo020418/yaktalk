@@ -1,4 +1,5 @@
 from langchain_core.runnables import Runnable
+from langchain_core.utils.function_calling import convert_to_openai_function
 
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI

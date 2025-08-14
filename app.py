@@ -1,8 +1,9 @@
 import os
 import tempfile
 import shutil
+import json
 from pathlib import Path
-from typing import Optional, List
+from typing import Dict, Any, Optional, List
 from typing_extensions import TypedDict
 from typing import Annotated, Sequence, cast
 
@@ -19,10 +20,10 @@ from langgraph.prebuilt import ToolNode
 from utils.get_model import get_model
 from call_functions import pdf_reader, law_api, pdf_highlighter
 
-# debug mode
+# Enable debug mode for development
 set_debug(True)
 
-# Global memory
+# Global memory for the graph
 memory = InMemorySaver()
 
 
@@ -139,10 +140,11 @@ class ChainlitLawChatbot:
             f"{pdf_status}"
             "You are a legal AI assistant specializing in Korean law. "
             "Workflow: "
-            "1. If PDF is loaded: When user asks about PDF content, use search_pdf_content to examine the document (If no PDF is loaded: Inform user to upload a PDF document first) "
+            "1. If PDF is loaded: When user asks about PDF content, use search_pdf_content to examine the document "
             "2. Search for relevant laws using search_law_by_query based on the PDF content "
             "3. Provide answers strictly based on legal statutes with article numbers "
-            "4. Use highlight_pdf_tool to highlight important or relevant information in the PDF before responding "
+            "4. Use highlight_pdf to highlight important or relevant information in the PDF by specifying the page number and text snippet to highlight "
+            "5. If no PDF is loaded: Inform user to upload a PDF document first "
             "IMPORTANT: The PDF is only the subject of analysis, NOT the basis for answers. "
             "All legal judgments and advice must cite specific legal provisions via search_law_by_query. (if failed, make it known)"
             "When highlighting text, make sure to use the exact text snippet found in the PDF and correct page number (0-indexed). "
@@ -198,7 +200,7 @@ class ChainlitLawChatbot:
         
         # Check if a highlighted PDF was created or if there was an error
         for message in tool_response["messages"]:
-            if isinstance(message, ToolMessage) and message.name == "highlight_pdf_tool":
+            if isinstance(message, ToolMessage) and message.name == "highlight_pdf":
                 # Extract response from the tool
                 response_content = str(message.content).strip()
                 if response_content.startswith("ERROR:"):
@@ -248,7 +250,7 @@ class ChainlitLawChatbot:
             tool_names = [call["name"] for call in ai_message.tool_calls]
             
             # PDF 하이라이터 도구 확인 (우선순위가 높음)
-            if any(name in ["highlight_pdf_tool"] for name in tool_names):
+            if any(name in ["highlight_pdf"] for name in tool_names):
                 return "pdf_highlighter_tools"
             
             # PDF 검색 도구 확인

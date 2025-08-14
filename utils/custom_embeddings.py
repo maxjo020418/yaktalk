@@ -6,6 +6,7 @@ from typing import List
 from langchain_community.embeddings import OllamaEmbeddings
 from sentence_transformers import SentenceTransformer
 from langchain_core.embeddings import Embeddings
+import numpy as np
 
 class LocalEmbeddings(Embeddings):
     """Local embeddings using sentence-transformers for PDF processing"""
