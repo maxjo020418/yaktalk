@@ -38,7 +38,7 @@ def _normalize_for_pdf_search(text: str) -> str:
     return text#.strip()
 
 
-def highlight_pdf(
+def _highlight_pdf_file(
     pdf_path: str | Path,
     spans: Iterable[Tuple[int, str]],
 ) -> str:
@@ -219,7 +219,7 @@ def highlight_pdf(
 
 
 @tool
-def highlight_pdf(page_number: int, snippet: str) -> str:
+def highlight_pdf_tool(page_number: int, snippet: str) -> str:
     """
     Highlights snippet in the currently loaded PDF.
     (Do not edit the original text or add omission '...' dots)
@@ -236,7 +236,7 @@ def highlight_pdf(page_number: int, snippet: str) -> str:
     # Use existing highlighted version if it exists, otherwise use original
     source_pdf = str(highlighted_path) if highlighted_path.exists() else pdf_path
     
-    result = highlight_pdf(source_pdf, [(page_number, snippet)])
+    result = _highlight_pdf_file(source_pdf, [(page_number, snippet)])
     
     # Check if it's an error message
     if result.startswith("ERROR:"):
@@ -250,4 +250,4 @@ def highlight_pdf(page_number: int, snippet: str) -> str:
 
 
 # Export tools (for consistency with other modules)
-tools = [highlight_pdf]
+tools = [highlight_pdf_tool]

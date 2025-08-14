@@ -143,7 +143,7 @@ class ChainlitLawChatbot:
             "1. If PDF is loaded: When user asks about PDF content, use search_pdf_content to examine the document "
             "2. Search for relevant laws using search_law_by_query based on the PDF content "
             "3. Provide answers strictly based on legal statutes with article numbers "
-            "4. Use highlight_pdf to highlight important or relevant information in the PDF by specifying the page number and text snippet to highlight "
+            "4. Use highlight_pdf_tool to highlight important or relevant information in the PDF by specifying the page number and text snippet to highlight "
             "5. If no PDF is loaded: Inform user to upload a PDF document first "
             "IMPORTANT: The PDF is only the subject of analysis, NOT the basis for answers. "
             "All legal judgments and advice must cite specific legal provisions via search_law_by_query. (if failed, make it known)"
@@ -200,7 +200,7 @@ class ChainlitLawChatbot:
         
         # Check if a highlighted PDF was created or if there was an error
         for message in tool_response["messages"]:
-            if isinstance(message, ToolMessage) and message.name == "highlight_pdf":
+            if isinstance(message, ToolMessage) and message.name == "highlight_pdf_tool":
                 # Extract response from the tool
                 response_content = str(message.content).strip()
                 if response_content.startswith("ERROR:"):
@@ -250,7 +250,7 @@ class ChainlitLawChatbot:
             tool_names = [call["name"] for call in ai_message.tool_calls]
             
             # PDF 하이라이터 도구 확인 (우선순위가 높음)
-            if any(name in ["highlight_pdf"] for name in tool_names):
+            if any(name in ["highlight_pdf_tool"] for name in tool_names):
                 return "pdf_highlighter_tools"
             
             # PDF 검색 도구 확인
