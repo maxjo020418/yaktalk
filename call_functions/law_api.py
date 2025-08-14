@@ -2,7 +2,6 @@
 법령 정보 API 호출 및 ChromaDB 저장 모듈
 """
 
-import os
 import sys
 import requests
 import re

@@ -1,9 +1,8 @@
 import os
 import tempfile
 import shutil
-import json
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Optional, List
 from typing_extensions import TypedDict
 from typing import Annotated, Sequence, cast
 
@@ -20,10 +19,10 @@ from langgraph.prebuilt import ToolNode
 from utils.get_model import get_model
 from call_functions import pdf_reader, law_api, pdf_highlighter
 
-# Enable debug mode for development
+# debug mode
 set_debug(True)
 
-# Global memory for the graph
+# Global memory
 memory = InMemorySaver()
 
 
@@ -140,11 +139,10 @@ class ChainlitLawChatbot:
             f"{pdf_status}"
             "You are a legal AI assistant specializing in Korean law. "
             "Workflow: "
-            "1. If PDF is loaded: When user asks about PDF content, use search_pdf_content to examine the document "
+            "1. If PDF is loaded: When user asks about PDF content, use search_pdf_content to examine the document (If no PDF is loaded: Inform user to upload a PDF document first) "
             "2. Search for relevant laws using search_law_by_query based on the PDF content "
             "3. Provide answers strictly based on legal statutes with article numbers "
-            "4. Use highlight_pdf_tool to highlight important or relevant information in the PDF by specifying the page number and text snippet to highlight "
-            "5. If no PDF is loaded: Inform user to upload a PDF document first "
+            "4. Use highlight_pdf_tool to highlight important or relevant information in the PDF before responding "
             "IMPORTANT: The PDF is only the subject of analysis, NOT the basis for answers. "
             "All legal judgments and advice must cite specific legal provisions via search_law_by_query. (if failed, make it known)"
             "When highlighting text, make sure to use the exact text snippet found in the PDF and correct page number (0-indexed). "

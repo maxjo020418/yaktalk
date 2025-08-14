@@ -9,3 +9,5 @@
     아마 그냥 `langchain_chroma.Chroma`로 다 바꿔야할 듯, `langchain_community`버전 지원 이미 종료했음
 6. FIXED ~~`_fetch_law_data_by_query` 계속 안됨, 어케 된건지?~~
 7. `is_sufficient_result`에서 threshold score 적용해야할 듯 (상위 뽑는거로 충분하진 않음, 임베딩 어딘가에 문제 있는 듯)
+8. `./data/temp` 얘가 클리어를 안해줌 + 파일 다시 올리는건 아직 테스트를 안함/안될 것 같긴 한데
+9. 법령 검색 결과 좀 아쉬운데... API의 한계도 있긴 함
