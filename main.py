@@ -40,7 +40,7 @@ class LawChatbot:
         self.graph = self._build_graph()
     
     def _build_graph(self) -> CompiledStateGraph:
-        """LangGraph 빌드"""
+        """LangGraph 그래프 생성"""
         graph_builder = StateGraph(MainState)
         
         # 노드 추가
